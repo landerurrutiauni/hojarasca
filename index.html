@@ -968,10 +968,11 @@ class Wind {                  // ráfaga que te empuja durante un rato
   draw() {}
 }
 
-class GravPad {               // farolillo de gravedad (dir -1 = hacia arriba)
-  constructor(x, y, dir) { Object.assign(this, { x, y, w: T, h: T, dir, t: R() * 6, cd: 0 }); }
+class GravPad {               // farolillo de gravedad (dir -1 = hacia arriba). Con haz: una cortina de luz de suelo a techo que no se puede esquivar
+  constructor(x, y, dir, beamY) { Object.assign(this, { x, y, w: T, h: T, dir, t: R() * 6, cd: 0, beamY });
+    this.zone = beamY === undefined ? { x, y, w: T, h: T } : { x: x + 3, y: Math.min(y, beamY), w: T - 6, h: Math.abs(beamY - y) + (beamY > y ? 0 : T) }; }
   update(dt) { this.t += dt; if (this.cd > 0) { this.cd -= dt; return; }
-    if (G.state === 'play' && G.P.grav !== this.dir && overlap(G.P, this)) { setGrav(this.dir); this.cd = 0.4; } }
+    if (G.state === 'play' && G.P.grav !== this.dir && overlap(G.P, this.zone)) { setGrav(this.dir); this.cd = 0.4; } }
   draw(c, W) { drawPad(c, this, W); }
 }
 
@@ -1125,14 +1126,15 @@ const SEG = {
   mirror: { w: 2, plan(g) { return { n: 3, ok: g.mir < 1, go() { const c0 = g.c; g.ground(3); g.trig(c0 + 1, 1, () => toggleMirror()); g.mir++; } }; } },
   decoy:  { w: 2, plan(g) { return { n: 6, go() { const c0 = g.c; g.ground(6, false); g.ent(new Decoy(g.X(c0 + 1 + Math.floor(g.v() * 4)) + 1, g.Y(g.F) - 42)); } }; } },
   // ---- Mundo 4: gravedad y derrumbes ----
-  flipPass: { w: 3, plan(g, o = {}) { const bed = o.bed || g.ri(7, 8), n = 2 + bed + 4, pitBed = g.rng() < 0.45;
+  flipPass: { w: 3, plan(g, o = {}) { const bed = o.bed || g.ri(7, 8), n = 3 + bed + 4, pitBed = g.rng() < 0.45;
             return { n, ok: g.F - 6 >= 3, go() { const c0 = g.c, F = g.F, CR = F - 6;
               for (let k = c0; k < c0 + n; k++) g.ceil[k] = CR;
-              g.ground(2, false); g.ent(new GravPad(g.X(c0 + 1), g.Y(F) - T, -1));
+              g.ground(3, false); g.ent(new GravPad(g.X(c0), g.Y(CR), 1, g.Y(F)));   // si vuelves boca abajo, te devuelve al suelo
+              g.ent(new GravPad(g.X(c0 + 2), g.Y(F) - T, -1, g.Y(CR)));             // columna libre entre las dos cortinas
               const b0 = g.c;
               if (!pitBed) { g.ground(bed, false); g.spikeRow(b0, bed - 1); } else { g.pit(bed - 1); g.ground(1, false); }
               if (!o.easy && g.d > 0.25) { if (g.v() < 0.5) g.ceilSpike(b0 + 4, 1); else g.ceilSpike(b0 + 3, 1); }
-              const p = g.c; g.ent(new GravPad(g.X(p), g.Y(CR), 1)); g.ground(4, true); g.oneway = Math.max(g.oneway, p); } }; } },
+              const p = g.c; g.ent(new GravPad(g.X(p), g.Y(CR), 1, g.Y(F))); g.ground(4, true); g.oneway = Math.max(g.oneway, p); } }; } },
   flipTrap: { w: 3, plan(g) { return { n: 6, go() { const c0 = g.c; g.ground(6, false); g.ceilSpike(c0, 6);
               g.trig(c0 + 1.5 + Math.floor(g.v() * 2), 1, () => { setGrav(-1, { stun: 0.45 }); bubble(G.P, pick(tl('grav')), 1.2); }, g.Y(g.F) - 18, g.Y(g.F)); } }; } },
   rain:   { w: 3, plan(g) { const n = g.d > 0.5 ? 6 : 5;
@@ -1291,7 +1293,7 @@ function finalizeEnd(g) {
   const pair = !ceilDoor && !g.chase && g.wi >= 2 && g.li > 0 && g.rng() < (g.wi === 2 ? 0.4 : 0.15);
   if (ceilDoor) {
     const CR = F - 6; for (let k = e0; k < cols - 1; k++) g.ceil[k] = CR;
-    g.ground(cols - 1 - g.c, false); g.ent(new GravPad(g.X(e0 + 1), g.Y(F) - T, -1));
+    g.ground(cols - 1 - g.c, false); g.ent(new GravPad(g.X(e0), g.Y(CR), 1, g.Y(F))); g.ent(new GravPad(g.X(e0 + 2), g.Y(F) - T, -1, g.Y(CR)));
     L.door = new Door(g.X(cols - 3) + 1, g.Y(CR), true);
     return;
   }
@@ -1914,6 +1916,9 @@ function drawPlank(c, x, y, w, h, crack) {
 }
 function drawPad(c, p, W) {
   const cx0 = p.x + p.w / 2, cy0 = p.y + p.h / 2 + Math.sin(p.t * 3) * 2.5;
+  if (p.beamY !== undefined) { const z = p.zone, g = c.createLinearGradient(z.x, 0, z.x + z.w, 0);   // cortina de luz
+    g.addColorStop(0, hexA(W.glow, 0)); g.addColorStop(0.5, hexA(W.glow, 0.16 + 0.06 * Math.sin(p.t * 4))); g.addColorStop(1, hexA(W.glow, 0)); c.fillStyle = g; c.fillRect(z.x - 4, z.y, z.w + 8, z.h);
+    for (let i = 0; i < 4; i++) { const k = ((p.t * 0.5 * -p.dir + i / 4) % 1 + 1) % 1; c.fillStyle = hexA(W.glow, 0.5 * Math.sin(k * Math.PI)); circ(c, cx0 + Math.sin(i * 2.3 + p.t) * 6, z.y + z.h * k, 1.6); } }
   glowAt(c, cx0, cy0, 36, W.glow, 0.5);
   c.strokeStyle = 'rgba(255,255,255,.35)'; c.lineWidth = 1; c.beginPath();
   if (p.dir > 0) { c.moveTo(cx0, p.y); c.lineTo(cx0, cy0 - 9); } else { c.moveTo(cx0, p.y + p.h); c.lineTo(cx0, cy0 + 9); } c.stroke();
